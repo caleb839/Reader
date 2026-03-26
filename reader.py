@@ -30,13 +30,7 @@ async def on_message(message):
         "from_server": str(message.guild.name)
     }
 
-    # 3. Action A: Send to the API (Webhook)
-    try:
-        requests.post(TARGET_URL, json=payload, timeout=5)
-    except Exception as e:
-        print(f"API Error: {e}")
-
-    # 4. Action B: Write to the other server
+    # 3. Action B: Write to the other server
     write_channel = bot.get_channel(WRITE_ID)
     if write_channel:
         await write_channel.send(f"**{message.author}** said: {message.content}")
