@@ -3,6 +3,7 @@ import os
 import sys
 from discord.ext import commands
 
+# --- CONFIGURATION ---
 TOKEN = os.getenv('DISCORD_TOKEN')
 WRITE_ID_RAW = os.getenv('WRITE_CHANNEL_ID', '0')
 WRITE_ID = int(WRITE_ID_RAW) if WRITE_ID_RAW.isdigit() else 0
@@ -10,6 +11,7 @@ WRITE_ID = int(WRITE_ID_RAW) if WRITE_ID_RAW.isdigit() else 0
 raw_read_ids = os.getenv('READ_CHANNEL_IDS', '')
 READ_IDS = [int(i.strip()) for i in raw_read_ids.split(',') if i.strip()]
 
+# --- BOT SETUP ---
 intents = discord.Intents.default()
 intents.message_content = True 
 
@@ -28,42 +30,39 @@ async def on_ready():
     except Exception as e:
         print(f'❌ ERROR: Could not find Write Channel ID {WRITE_ID}.')
         print(f'   Reason: {e}')
+        print(f'   Check if the bot is invited to the destination server.')
 
     # 2. Check Read Channels (Sources)
     print(f'\n--- 📢 CHECKING READ CHANNELS ---')
     if not READ_IDS:
-        print("⚠️ WARNING: READ_CHANNEL_IDS is empty!")
+        print("⚠️ WARNING: READ_CHANNEL_IDS is empty in your Railway variables!")
     
     for r_id in READ_IDS:
         try:
             channel = bot.get_channel(r_id) or await bot.fetch_channel(r_id)
             print(f'✅ LISTENING TO: #{channel.name} (ID: {r_id}) in Server: {channel.guild.name}')
         except Exception as e:
-            print(f'❌ ERROR: Access denied to Read Channel {r_id}. Reason: {e}')
+            print(f'❌ ERROR: Access denied to Read Channel {r_id}.')
+            print(f'   Reason: {e}')
     
     print(f'\n--- 🚀 BOT IS FULLY OPERATIONAL ---\n')
 
 @bot.event
 async def on_message(message):
-    # --- MODIFIED FILTER ---
-    # Only ignore the bot's OWN messages. 
-    # This allows Klopyzx and other App/Webhook traders to be processed.
-    if message.author.id == bot.user.id:
-        return
+    # Log filtered activity to console
+    if message.channel.id in READ_IDS and not message.author.bot:
+        print(f"📩 Heard message from {message.author} in #{message.channel.name}: {message.content[:30]}...")
 
-    # Ensure message is from a monitored channel
-    if message.channel.id not in READ_IDS:
+    # Filter: Ignore bots or messages from non-monitored channels
+    if message.author.bot or message.channel.id not in READ_IDS:
         return
-
-    # Log to console for debugging
-    print(f"📩 Heard message from {message.author} (Bot: {message.author.bot}) in #{message.channel.name}")
 
     # Find Write Channel
     write_channel = bot.get_channel(WRITE_ID)
     if not write_channel:
         try:
             write_channel = await bot.fetch_channel(WRITE_ID)
-        except:
+        except Exception:
             return
 
     # Handle Replies
@@ -74,40 +73,30 @@ async def on_message(message):
             content_snippet = (ref.content[:50] + '...') if len(ref.content) > 50 else ref.content
             reply_info = f"*(Replying to {ref.author}: {content_snippet})*\n"
 
-    # Handle Embeds (Common for Apps like Klopyzx)
+    # Handle Embeds
     embed_text = ""
     if message.embeds:
         for embed in message.embeds:
             if embed.description: 
-                embed_text += f"\n**[Embed Description]:** {embed.description}"
-            if embed.title: 
-                embed_text += f"\n**[Embed Title]:** {embed.title}"
-            # Check for fields in embeds (sometimes used for TP/SL targets)
-            if embed.fields:
-                for field in embed.fields:
-                    embed_text += f"\n**{field.name}:** {field.value}"
+                embed_text += f"\n[Embed]: {embed.description}"
+            elif embed.title: 
+                embed_text += f"\n[Embed]: {embed.title}"
 
     # Construct Content
-    # If the message has no text but has an embed, we still want to send it
-    msg_body = message.content if message.content else ""
-    
     final_content = (
         f"{reply_info}"
         f"**Trader:** {message.author}\n"
-        f"**Message:** {msg_body if msg_body else '(Alert Box Below)'}"
+        f"**Message:** {message.content if message.content else '(No text)'}"
         f"{embed_text}"
     )
 
-    # Handle Attachments (Images/Charts)
+    # Handle Attachments
     files = []
     if message.attachments:
         for attachment in message.attachments:
-            try:
-                files.append(await attachment.to_file())
-            except:
-                continue
+            files.append(await attachment.to_file())
 
-    # Send to destination
+    # Send Message
     try:
         await write_channel.send(content=final_content, files=files)
         print(f"✅ Forwarded successfully.")
