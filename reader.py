@@ -30,39 +30,42 @@ async def on_ready():
     except Exception as e:
         print(f'❌ ERROR: Could not find Write Channel ID {WRITE_ID}.')
         print(f'   Reason: {e}')
-        print(f'   Check if the bot is invited to the destination server.')
 
     # 2. Check Read Channels (Sources)
     print(f'\n--- 📢 CHECKING READ CHANNELS ---')
     if not READ_IDS:
-        print("⚠️ WARNING: READ_CHANNEL_IDS is empty in your Railway variables!")
+        print("⚠️ WARNING: READ_CHANNEL_IDS is empty!")
     
     for r_id in READ_IDS:
         try:
             channel = bot.get_channel(r_id) or await bot.fetch_channel(r_id)
             print(f'✅ LISTENING TO: #{channel.name} (ID: {r_id}) in Server: {channel.guild.name}')
         except Exception as e:
-            print(f'❌ ERROR: Access denied to Read Channel {r_id}.')
-            print(f'   Reason: {e}')
+            print(f'❌ ERROR: Access denied to Read Channel {r_id}. Reason: {e}')
     
     print(f'\n--- 🚀 BOT IS FULLY OPERATIONAL ---\n')
 
 @bot.event
 async def on_message(message):
-    # Log filtered activity to console
-    if message.channel.id in READ_IDS and not message.author.bot:
-        print(f"📩 Heard message from {message.author} in #{message.channel.name}: {message.content[:30]}...")
-
-    # Filter: Ignore bots or messages from non-monitored channels
-    if message.author.bot or message.channel.id not in READ_IDS:
+    # --- FIX: ALLOW OTHER BOTS/APPS ---
+    # We only ignore the bot's OWN ID to prevent a loop.
+    # This allows Klopyzx and Trader Neil's Bot (which have the APP tag) to pass through.
+    if message.author.id == bot.user.id:
         return
+
+    # Ensure message is from a monitored channel
+    if message.channel.id not in READ_IDS:
+        return
+
+    # Log to console so you can see it working in Railway
+    print(f"📩 Heard message from {message.author} in #{message.channel.name}")
 
     # Find Write Channel
     write_channel = bot.get_channel(WRITE_ID)
     if not write_channel:
         try:
             write_channel = await bot.fetch_channel(WRITE_ID)
-        except Exception:
+        except:
             return
 
     # Handle Replies
@@ -73,28 +76,39 @@ async def on_message(message):
             content_snippet = (ref.content[:50] + '...') if len(ref.content) > 50 else ref.content
             reply_info = f"*(Replying to {ref.author}: {content_snippet})*\n"
 
-    # Handle Embeds
+    # --- FIX: ENHANCED EMBED HANDLING ---
+    # Most trading bots (Neil/Klopyzx) send data inside Embeds.
     embed_text = ""
     if message.embeds:
         for embed in message.embeds:
+            if embed.title: 
+                embed_text += f"\n**{embed.title}**"
             if embed.description: 
-                embed_text += f"\n[Embed]: {embed.description}"
-            elif embed.title: 
-                embed_text += f"\n[Embed]: {embed.title}"
+                embed_text += f"\n{embed.description}"
+            
+            # Check for fields (often used for Entry, TP, and SL)
+            if embed.fields:
+                for field in embed.fields:
+                    embed_text += f"\n**{field.name}:** {field.value}"
 
-    # Construct Content
+    # Construct Final Content
+    msg_body = message.content if message.content else ""
+    
     final_content = (
         f"{reply_info}"
         f"**Trader:** {message.author}\n"
-        f"**Message:** {message.content if message.content else '(No text)'}"
+        f"**Message:** {msg_body if msg_body else '(Alert Box Below)'}"
         f"{embed_text}"
     )
 
-    # Handle Attachments
+    # Handle Attachments (Charts/Screenshots)
     files = []
     if message.attachments:
         for attachment in message.attachments:
-            files.append(await attachment.to_file())
+            try:
+                files.append(await attachment.to_file())
+            except:
+                continue
 
     # Send Message
     try:
