@@ -29,7 +29,7 @@ async def on_ready():
         print(f'✅ DESTINATION FOUND: #{write_channel.name} in Server: {write_channel.guild.name}')
     except Exception as e:
         print(f'❌ ERROR: Could not find Write Channel ID {WRITE_ID}.')
-        print(f'   Reason: {e}')
+        print(f'    Reason: {e}')
 
     # 2. Check Read Channels (Sources)
     print(f'\n--- 📢 CHECKING READ CHANNELS ---')
@@ -47,9 +47,7 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
-    # --- FIX: ALLOW OTHER BOTS/APPS ---
-    # We only ignore the bot's OWN ID to prevent a loop.
-    # This allows Klopyzx and Trader Neil's Bot (which have the APP tag) to pass through.
+    # Ignore the bot's own messages to prevent loops
     if message.author.id == bot.user.id:
         return
 
@@ -57,18 +55,12 @@ async def on_message(message):
     if message.channel.id not in READ_IDS:
         return
 
-    # Log to console so you can see it working in Railway
-    print(f"📩 Heard message from {message.author} in #{message.channel.name}")
-
     # Find Write Channel
-    write_channel = bot.get_channel(WRITE_ID)
+    write_channel = bot.get_channel(WRITE_ID) or await bot.fetch_channel(WRITE_ID)
     if not write_channel:
-        try:
-            write_channel = await bot.fetch_channel(WRITE_ID)
-        except:
-            return
+        return
 
-    # Handle Replies
+    # --- HANDLE REPLIES ---
     reply_info = ""
     if message.reference and message.reference.resolved:
         ref = message.reference.resolved
@@ -76,9 +68,11 @@ async def on_message(message):
             content_snippet = (ref.content[:50] + '...') if len(ref.content) > 50 else ref.content
             reply_info = f"*(Replying to {ref.author}: {content_snippet})*\n"
 
-    # --- FIX: ENHANCED EMBED HANDLING ---
-    # Most trading bots (Neil/Klopyzx) send data inside Embeds.
+    # --- HANDLE EMBEDS & IMAGES ---
+    # Trading bots like Klopyzx send images (BingX PnL) inside Embed objects.
     embed_text = ""
+    image_url = None
+    
     if message.embeds:
         for embed in message.embeds:
             if embed.title: 
@@ -86,22 +80,18 @@ async def on_message(message):
             if embed.description: 
                 embed_text += f"\n{embed.description}"
             
-            # Check for fields (often used for Entry, TP, and SL)
+            # Check for fields (Entry, TP, SL)
             if embed.fields:
                 for field in embed.fields:
                     embed_text += f"\n**{field.name}:** {field.value}"
+            
+            # CRITICAL FIX: Grab the image URL from the source embed
+            if embed.image and embed.image.url:
+                image_url = embed.image.url
+            elif embed.thumbnail and embed.thumbnail.url:
+                image_url = embed.thumbnail.url
 
-    # Construct Final Content
-    msg_body = message.content if message.content else ""
-    
-    final_content = (
-        f"{reply_info}"
-        f"**Trader:** {message.author}\n"
-        f"**Message:** {msg_body if msg_body else '(Alert Box Below)'}"
-        f"{embed_text}"
-    )
-
-    # Handle Attachments (Charts/Screenshots)
+    # --- HANDLE ATTACHMENTS (Manual Screenshots) ---
     files = []
     if message.attachments:
         for attachment in message.attachments:
@@ -110,10 +100,24 @@ async def on_message(message):
             except:
                 continue
 
-    # Send Message
+    # --- CONSTRUCT FINAL OUTPUT ---
+    msg_body = message.content if message.content else ""
+    
+    # We create a new Embed to make it look clean and structured
+    forward_embed = discord.Embed(
+        description=f"{reply_info}**Trader:** {message.author}\n**Message:** {msg_body}\n{embed_text}",
+        color=discord.Color.blue()
+    )
+    
+    # If we found a bot image/thumbnail, attach it to our new embed
+    if image_url:
+        forward_embed.set_image(url=image_url)
+
+    # --- SEND MESSAGE ---
     try:
-        await write_channel.send(content=final_content, files=files)
-        print(f"✅ Forwarded successfully.")
+        # We send the embed (text + bot images) and the files (manual uploads)
+        await write_channel.send(embed=forward_embed, files=files)
+        print(f"✅ Forwarded message from {message.author} with visual data.")
     except Exception as e:
         print(f"❌ Failed to forward: {e}")
 
